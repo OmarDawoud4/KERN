@@ -30,3 +30,4 @@ class SwiGLU(nn.Module):
         up = self.w_up(x)
         h = gate * up
         return  self.w_down(h)
+    
