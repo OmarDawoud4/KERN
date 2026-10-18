@@ -1,4 +1,5 @@
 import argparse
+import math
 import time
 from pathlib import Path
 
@@ -34,6 +35,18 @@ def load_checkpoint(path: Path, model, opt) -> tuple[int, float]:
     return ckpt["step"], ckpt["best_val"]
 
 
+def lr_at(step: int, base_lr: float, warmup: int, total: int, min_frac: float = 0.1) -> float:
+    """Linear warmup for `warmup` steps, then cosine decay to base_lr * min_frac."""
+    floor = base_lr * min_frac
+    if step < warmup:
+        return base_lr * (step + 1) / max(warmup, 1)
+    if total <= warmup:
+        return base_lr
+    progress = (step - warmup) / (total - warmup)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+    return floor + (base_lr - floor) * coeff
+
+
 @torch.no_grad()
 def evaluate(model, loader, device, max_batches: int | None = None) -> float:
     model.eval()
@@ -64,6 +77,7 @@ def main()->None :
     p.add_argument("--data", type=Path, default=Path("data"))
     p.add_argument("--resume", action="store_true")
     p.add_argument("--max-eval-batches", type=int, default=50)
+    p.add_argument("--warmup", type=int, default=500)
     args = p.parse_args()
 
 
@@ -102,6 +116,11 @@ def main()->None :
                 break
 
             x,y = x.to(device), y.to(device)
+
+            cur_lr = lr_at(step, args.lr, args.warmup, args.steps)
+            for group in opt.param_groups:
+                group["lr"] = cur_lr
+
             logits = model(x)
 
             loss = nn.functional.cross_entropy(
@@ -123,7 +142,7 @@ def main()->None :
 
                 print(
                     f"step {step:>6} | train {train_avg:.4f} | val {val:.4f} "
-                    f"| {time.time() - t0:6.1f}s"
+                    f"| lr {cur_lr:.2e} | {time.time() - t0:6.1f}s"
                 )
                 running, seen = 0.0, 0
 
