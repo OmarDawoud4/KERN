@@ -30,6 +30,12 @@ def save_checkpoint(path: Path, model, opt, step: int, best_val: float, scaler=N
     )
 
 
+def save_weights(path: Path, model, step: int, val: float) -> None:
+    """Best-so-far weights only, no optimizer state, so 3x smaller than a checkpoint."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"model": model.state_dict(), "step": step, "val": val}, path)
+
+
 def load_checkpoint(path: Path, model, opt, scaler=None) -> tuple[int, float]:
     ckpt = torch.load(path, map_location="cpu", weights_only=True)
     model.load_state_dict(ckpt["model"])
@@ -159,11 +165,17 @@ def main()->None :
             if step % args.eval_every == 0 or step ==args.steps:
                 val= evaluate(model , val_loader , device , args.max_eval_batches , amp_dtype )
                 train_avg = running /max(seen , 1)
-                best_val = min(best_val, val)
+
+                if val < best_val:
+                    best_val = val
+                    save_weights(args.out / "best.pt", model, step, val)
+                    best_note = "  <- best"
+                else:
+                    best_note = ""
 
                 print(
                     f"step {step:>6} | train {train_avg:.4f} | val {val:.4f} "
-                    f"| lr {cur_lr:.2e} | {time.time() - t0:6.1f}s"
+                    f"| lr {cur_lr:.2e} | {time.time() - t0:6.1f}s{best_note}"
                 )
                 running, seen = 0.0, 0
 
